@@ -5,17 +5,17 @@
   "scripts": {
     "start": "bun .",
     "dev": "bun --watch .",
-    "dockerMongo": "docker stop mongos && docker rm mongos && docker run --name mongos -p 27017:27017 -d mongo:7.0.14-rc0-jammy"
+    "dockerMongo": "docker stop mongos && docker rm mongos && docker run --name mongos -p 27017:27017 -d mongo:latest"
   },
   "devDependencies": {
-    "@types/bun": "^1.1.9"
+    "@types/bun": "^1.2.13"
   },
   "peerDependencies": {
     "typescript": "^5.6.2"
   },
   "dependencies": {
-    "discord-oauth2": "^2.12.1",
-    "hono": "^4.6.1",
-    "mongoose": "^8.6.2"
+    "discord-oauth2": "github:clementvt/discord-oauth2#fix-clement",
+    "hono": "^4.7.10",
+    "mongoose": "^8.15.0"
   }
 }
