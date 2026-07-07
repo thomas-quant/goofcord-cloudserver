@@ -28,7 +28,7 @@ async function loadRoutes() {
 await loadRoutes();
 
 app.get('/', (c) => {
-    return c.redirect("https://github.com/Wuemeli/goofcord-cloudserver");
+    return c.redirect("https://codeberg.org/wuemeli/goofcord-cloudserver");
 })
 
 const port = parseInt(process.env.PORT!) || 3000
