@@ -10,7 +10,7 @@ const settingsSchema = new mongoose.Schema<SettingsDocument>(
         userId: { type: String, required: true },
         settings: { type: String, required: true },
     },
-    { versionKey: false },
+    { versionKey: false, autoIndex: false },
 );
 
 settingsSchema.index({ userId: 1 }, { unique: true, name: 'settings_userId_unique' });

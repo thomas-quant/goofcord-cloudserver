@@ -28,7 +28,7 @@ const userSchema = new mongoose.Schema<UserDocument>(
         userId: { type: String, required: true },
         sessions: { type: [userSessionSchema], required: true, default: [] },
     },
-    { versionKey: false },
+    { versionKey: false, autoIndex: false },
 );
 
 userSchema.path('sessions').validate(

@@ -7,6 +7,8 @@ import { User, type UserDocument } from '../../src/schemas/usersSchema';
 
 describe('clean-start data indexes', () => {
     test('declares the required unique indexes', () => {
+        expect(User.schema.get('autoIndex')).toBe(false);
+        expect(Settings.schema.get('autoIndex')).toBe(false);
         expect(User.schema.indexes()).toContainEqual([
             { userId: 1 },
             expect.objectContaining({ unique: true, name: 'users_userId_unique' }),
