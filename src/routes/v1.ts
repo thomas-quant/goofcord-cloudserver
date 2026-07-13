@@ -29,10 +29,16 @@ export function createV1Router(dependencies: V1Dependencies): Hono<AppEnv> {
         authenticate,
         dependencies.security.sessionRateLimit,
         async (context) => {
+            let json: { settings?: unknown };
             try {
-                const json = await context.req.json<{ settings?: unknown }>();
-                if (typeof json.settings !== 'string') return context.json({ error: 'Bad Request' }, 400);
+                json = await context.req.json<{ settings?: unknown }>();
+            } catch {
+                return context.json({ error: 'Bad Request' }, 400);
+            }
 
+            if (typeof json.settings !== 'string') return context.json({ error: 'Bad Request' }, 400);
+
+            try {
                 await dependencies.settings.save(session(context).userId, json.settings);
                 return context.json({ success: true });
             } catch {

@@ -21,8 +21,7 @@ export async function tokenRequest(refresh_token: string, oauth: DiscordOauth2) 
             scope: ['identify'],
             grantType: 'authorization_code',
         });
-    } catch (error) {
-        console.error(`Failed to obtain token: ${error}`);
+    } catch {
         return false;
     }
 }
