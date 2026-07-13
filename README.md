@@ -34,7 +34,7 @@ No helper stops or removes a pre-existing generic MongoDB container. To remove t
 
 ## Production TLS, proxies, and MongoDB
 
-For deployed mode, terminate TLS at a reverse proxy and set `ENFORCE_HTTPS=true`. Set `TRUSTED_PROXY_CIDRS` to only the proxy addresses or networks, and ensure the Bun service is reachable solely from that proxy or a private container network. The server only honors `X-Forwarded-For` and `X-Forwarded-Proto` when the direct Bun peer is trusted. Trusting forwarded headers while allowing direct public access permits clients to spoof them.
+For deployed mode, terminate TLS at a reverse proxy and set `ENFORCE_HTTPS=true`. Set `TRUSTED_PROXY_CIDRS` to only the proxy addresses or networks, and ensure the Bun service is reachable solely from that proxy or a private container network. The server only honors `X-Forwarded-For` and `X-Forwarded-Proto` when the direct Bun peer is trusted. Its trusted-proxy policy accepts exactly one forwarded client address and one forwarded protocol value; comma-separated forwarding chains are ignored. Trusting forwarded headers while allowing direct public access permits clients to spoof them.
 
 Local HTTP is supported only when HTTPS enforcement is explicitly disabled. With enforcement enabled, insecure non-local requests are rejected; responses known to be HTTPS receive HSTS.
 
