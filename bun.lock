@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "goofcord-cloudserver",
@@ -10,9 +11,7 @@
       },
       "devDependencies": {
         "@types/bun": "^1.2.13",
-      },
-      "peerDependencies": {
-        "typescript": "^5.6.2",
+        "typescript": "5.6.2",
       },
     },
   },
@@ -33,7 +32,7 @@
 
     "debug": ["debug@4.3.6", "", { "dependencies": { "ms": "2.1.2" } }, "sha512-O/09Bd4Z1fBrU4VzkhFqVgpPzaGbw6Sm9FEkBT1A/YBXQFGuuSxa1dN2nxgxS34JmKXqYx8CZAwEVoJFImUXIg=="],
 
-    "discord-oauth2": ["discord-oauth2@github:clementvt/discord-oauth2#30a533c", {}, "clementvt-discord-oauth2-30a533c"],
+    "discord-oauth2": ["discord-oauth2@github:clementvt/discord-oauth2#30a533c", {}, "clementvt-discord-oauth2-30a533c", "sha512-of2lrlxaYe2dFppNzSSklnOme/sWGGsCu4oxwtTYEaXDNYSmRgHVi7/9UKmV0k2Q2QLaRgp20SnKg6dCikyN9A=="],
 
     "hono": ["hono@4.7.10", "", {}, "sha512-QkACju9MiN59CKSY5JsGZCYmPZkA6sIW6OFCUp7qDjZu6S6KHtJHhAc9Uy9mV9F8PJ1/HQ3ybZF2yjCa/73fvQ=="],
 

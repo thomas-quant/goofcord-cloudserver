@@ -1,106 +1,99 @@
-import { randomBytes } from 'node:crypto';
-import { User } from '../schemas/usersSchema';
-import { Settings } from '../schemas/settingsSchema';
-import DiscordOauth2 from "discord-oauth2";
-import { getEnvVarStrict, getPathFileName, getUrlWithoutSlash, tokenRequest } from "../utils";
-import { Context, Hono, Next } from "hono";
+import { Hono, type MiddlewareHandler } from 'hono';
 
-const VERSION = '/' + getPathFileName(import.meta.url);
-const UNAUTHORIZED_ERROR = 'Unauthorized. Please authenticate again';
+import type { AppEnv, AuthenticatedSession, V1Dependencies } from '../contracts';
+
+export const UNAUTHORIZED_ERROR = 'Unauthorized. Please authenticate again';
 const INTERNAL_SERVER_ERROR = 'Internal Server Error';
 
-const oauth = new DiscordOauth2({
-    clientId: getEnvVarStrict('CLIENT_ID'),
-    clientSecret: getEnvVarStrict('CLIENT_SECRET'),
-    redirectUri: getUrlWithoutSlash(getEnvVarStrict('REDIRECT_URI')) + VERSION + '/callback',
-}); const authURL = oauth.generateAuthUrl({scope: ['identify']});
+export function createV1Router(dependencies: V1Dependencies): Hono<AppEnv> {
+    const app = new Hono<AppEnv>();
 
-const app = new Hono<{ Variables: { user: User } }>();
-export default app;
+    const authenticate: MiddlewareHandler<AppEnv> = async (context, next) => {
+        const rawAuthorization = context.req.header('authorization');
+        if (!rawAuthorization) return context.json({ error: UNAUTHORIZED_ERROR }, 401);
 
-const authMiddleware = async (c: Context, next: Next) => {
-    const authToken = c.req.header("authorization");
-    if (!authToken) return c.json({ error: UNAUTHORIZED_ERROR }, 401);
+        const session = await dependencies.auth.authenticate(rawAuthorization);
+        if (!session) return context.json({ error: UNAUTHORIZED_ERROR }, 401);
 
-    const user = await User.findOne({ authToken });
-    if (!user) return c.json({ error: UNAUTHORIZED_ERROR }, 401);
-    c.set('user', user);
+        context.set('authenticatedSession', session);
+        await next();
+    };
 
-    await next();
-};
+    const session = (context: { get: (key: 'authenticatedSession') => AuthenticatedSession }) =>
+        context.get('authenticatedSession');
 
-app.post('/save', authMiddleware, async (c) => {
-    try {
-        const user = c.get('user');
-        const json = await c.req.json();
-        const settings = json.settings;
+    app.post(
+        '/save',
+        dependencies.security.saveBodyLimit,
+        dependencies.security.protectedIpRateLimit,
+        authenticate,
+        dependencies.security.sessionRateLimit,
+        async (context) => {
+            try {
+                const json = await context.req.json<{ settings?: unknown }>();
+                if (typeof json.settings !== 'string') return context.json({ error: 'Bad Request' }, 400);
 
-        if (typeof settings !== 'string') return c.json({ error: 'Bad Request' }, 400);
+                await dependencies.settings.save(session(context).userId, json.settings);
+                return context.json({ success: true });
+            } catch {
+                return context.json({ error: INTERNAL_SERVER_ERROR }, 500);
+            }
+        },
+    );
 
-        await Settings.updateOne({ userId: user.userId }, { settings }, { upsert: true });
+    app.get(
+        '/load',
+        dependencies.security.protectedIpRateLimit,
+        authenticate,
+        dependencies.security.sessionRateLimit,
+        async (context) => {
+            try {
+                const settings = await dependencies.settings.load(session(context).userId);
+                return context.json({ settings: settings ?? '' });
+            } catch {
+                return context.json({ error: INTERNAL_SERVER_ERROR }, 500);
+            }
+        },
+    );
 
-        return c.json({ success: true });
-    } catch (error) {
-        console.error(error);
-        return c.json({ error: INTERNAL_SERVER_ERROR }, 500);
-    }
-});
+    app.get(
+        '/delete',
+        dependencies.security.protectedIpRateLimit,
+        authenticate,
+        dependencies.security.sessionRateLimit,
+        async (context) => {
+            try {
+                const userId = session(context).userId;
+                await dependencies.settings.deleteForUser(userId);
+                await dependencies.auth.revokeAllSessions(userId);
+                return context.json({ success: true });
+            } catch {
+                return context.json({ error: INTERNAL_SERVER_ERROR }, 500);
+            }
+        },
+    );
 
-app.get('/load', authMiddleware, async (c) => {
-    try {
-        const user = c.get('user');
+    app.get('/login', (context) => context.redirect(dependencies.oauth.authorizationUrl()));
 
-        const settingsRaw = await Settings.findOne({ userId: user.userId });
-        if (!settingsRaw) return c.json({ settings: "" });
+    app.get('/callback', dependencies.security.callbackIpRateLimit, async (context) => {
+        const code = context.req.query('code');
+        if (!code) return context.json({ error: 'OAuth2 code not found' }, 400);
 
-        return c.json({ settings: settingsRaw.settings });
-    } catch (error) {
-        console.error(error);
-        return c.json({ error: INTERNAL_SERVER_ERROR }, 500);
-    }
-});
+        try {
+            const result = await dependencies.oauth.userIdForCode(code);
+            if (result.kind === 'invalid_code') {
+                return context.json({ error: 'Failed to obtain token. Is the OAuth2 code correct?' }, 400);
+            }
 
-app.get('/delete', authMiddleware, async (c) => {
-    try {
-        const user = c.get('user');
+            const token = await dependencies.auth.createSession(result.userId);
+            return context.json({ token });
+        } catch {
+            return context.json({ error: INTERNAL_SERVER_ERROR }, 500);
+        }
+    });
 
-        await User.deleteOne({ userId: user.userId });
-        await Settings.deleteOne({ userId: user.userId });
+    app.get('/clientid', (context) => context.body(dependencies.clientId));
+    app.get('/ping', (context) => context.text('Pong!'));
 
-        return c.json({ success: true });
-    } catch (error) {
-        console.error(error);
-        return c.json({ error: INTERNAL_SERVER_ERROR }, 500);
-    }
-});
-
-app.get('/login', async (c) => c.redirect(authURL));
-
-app.get('/callback', async (c) => {
-    const refreshToken = c.req.query('code');
-    if (!refreshToken) return c.json({ error: "OAuth2 code not found" }, 400);
-
-    const token = await tokenRequest(refreshToken, oauth);
-    if (!token) return c.json({ error: "Failed to obtain token. Is the OAuth2 code correct?" }, 400);
-
-    const userData = await oauth.getUser(token.access_token);
-    const userId = userData.id;
-
-    const check = await User.findOne({ userId });
-    const authToken = randomBytes(16).toString('hex');
-    if (check) {
-        await User.updateOne({ userId }, { authToken });
-    } else {
-        await User.create({ userId, authToken });
-    }
-
-    return c.json({ token: authToken });
-});
-
-app.get('/clientid', (c) => {
-    return c.body(getEnvVarStrict('CLIENT_ID'));
-});
-
-app.get('/ping', (c) => {
-    return c.text('Pong!');
-});
+    return app;
+}

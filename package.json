@@ -5,13 +5,13 @@
   "scripts": {
     "start": "bun .",
     "dev": "bun --watch .",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
     "dockerMongo": "docker stop mongos && docker rm mongos && docker run --name mongos -p 27017:27017 -d mongo:latest"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.13"
-  },
-  "peerDependencies": {
-    "typescript": "^5.6.2"
+    "@types/bun": "^1.2.13",
+    "typescript": "5.6.2"
   },
   "dependencies": {
     "discord-oauth2": "github:clementvt/discord-oauth2#fix-clement",
