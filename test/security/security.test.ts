@@ -1,0 +1,221 @@
+import { describe, expect, test } from 'bun:test';
+import { Hono } from 'hono';
+
+import type { AppConfig } from '../../src/config';
+import type { AppEnv } from '../../src/contracts';
+import { createSecurity, readJsonBody } from '../../src/security';
+
+const config = (overrides: Partial<AppConfig> = {}): AppConfig => ({
+    clientId: 'test-client-id',
+    clientSecret: 'test-client-secret',
+    redirectUri: 'http://localhost:3000',
+    mongoUri: 'mongodb://127.0.0.1:27017/goofcord-test',
+    port: 3000,
+    mongoServerSelectionTimeoutMs: 5_000,
+    maxRequestBodyBytes: 1024 * 1024,
+    sessionTouchIntervalMs: 15 * 60 * 1_000,
+    enforceHttps: false,
+    trustedProxyCidrs: [],
+    rateLimitMaxKeys: 100,
+    ipRateLimit: { limit: 100, windowMs: 60_000 },
+    callbackRateLimit: { limit: 20, windowMs: 60_000 },
+    sessionRateLimit: { limit: 60, windowMs: 60_000 },
+    ...overrides,
+});
+
+function application(security = createSecurity(config())): Hono<AppEnv> {
+    const app = new Hono<AppEnv>();
+    app.onError(security.application.onError);
+    app.use('*', security.application.resolveClientRequest);
+    app.use('*', security.application.enforceHttps);
+    app.use('*', security.application.securityHeaders);
+    return app;
+}
+
+function request(
+    path: string,
+    init: RequestInit = {},
+    directPeerAddress = '198.51.100.10',
+): [Request, AppEnv['Bindings']] {
+    return [new Request(`http://service.test${path}`, init), { directPeerAddress }];
+}
+
+describe('save body limit', () => {
+    test('accepts a body exactly at the limit and rejects one byte over', async () => {
+        const security = createSecurity(config({ maxRequestBodyBytes: 4 }));
+        const app = application(security);
+        app.post('/save', security.routes.saveBodyLimit, async (context) => context.text(await context.req.text()));
+
+        const exact = await app.fetch(...request('/save', { method: 'POST', body: 'four' }));
+        expect(exact.status).toBe(200);
+        expect(await exact.text()).toBe('four');
+
+        const tooLarge = await app.fetch(...request('/save', { method: 'POST', body: 'five!' }));
+        expect(tooLarge.status).toBe(413);
+        expect(await tooLarge.json()).toEqual({ error: 'Payload Too Large' });
+    });
+
+    test('counts UTF-8 stream bytes despite missing or false Content-Length', async () => {
+        const security = createSecurity(config({ maxRequestBodyBytes: 3 }));
+        const app = application(security);
+        app.post('/save', security.routes.saveBodyLimit, (context) => context.text('accepted'));
+
+        const missingLength = await app.fetch(...request('/save', {
+            method: 'POST',
+            body: new ReadableStream({
+                start(controller) {
+                    controller.enqueue(new TextEncoder().encode('éé'));
+                    controller.close();
+                },
+            }),
+        }));
+        expect(missingLength.status).toBe(413);
+
+        const falseLength = await app.fetch(...request('/save', {
+            method: 'POST',
+            headers: { 'Content-Length': '1' },
+            body: 'four',
+        }));
+        expect(falseLength.status).toBe(413);
+    });
+
+    test('offers routes a safe malformed JSON result', async () => {
+        const security = createSecurity(config());
+        const app = application(security);
+        app.post('/save', security.routes.saveBodyLimit, async (context) => {
+            const body = await readJsonBody<{ settings?: unknown }>(context);
+            if (!body.ok || typeof body.value.settings !== 'string') {
+                return context.json({ error: 'Bad Request' }, 400);
+            }
+            return context.json({ settings: body.value.settings });
+        });
+
+        const malformed = await app.fetch(...request('/save', { method: 'POST', body: '{"settings"' }));
+        expect(malformed.status).toBe(400);
+        expect(await malformed.json()).toEqual({ error: 'Bad Request' });
+    });
+});
+
+describe('rate limits', () => {
+    test('uses separate IP, callback, and token-hash session buckets', async () => {
+        const security = createSecurity(config({
+            ipRateLimit: { limit: 2, windowMs: 60_000 },
+            callbackRateLimit: { limit: 1, windowMs: 60_000 },
+            sessionRateLimit: { limit: 1, windowMs: 60_000 },
+        }));
+        const app = application(security);
+        app.get('/protected', security.routes.protectedIpRateLimit, async (context, next) => {
+            context.set('authenticatedSession', { userId: 'user', tokenHash: context.req.header('x-token') ?? '' });
+            await next();
+        }, security.routes.sessionRateLimit, (context) => context.text('ok'));
+        app.get('/callback', security.routes.callbackIpRateLimit, (context) => context.text('ok'));
+
+        expect((await app.fetch(...request('/protected', { headers: { 'x-token': 'hash-a' } }, '198.51.100.1'))).status).toBe(200);
+        const sameSessionDifferentIp = await app.fetch(...request('/protected', { headers: { 'x-token': 'hash-a' } }, '198.51.100.2'));
+        expect(sameSessionDifferentIp.status).toBe(429);
+        expect(sameSessionDifferentIp.headers.get('Retry-After')).toMatch(/^\d+$/);
+
+        expect((await app.fetch(...request('/callback', {}, '198.51.100.1'))).status).toBe(200);
+        expect((await app.fetch(...request('/callback', {}, '198.51.100.1'))).status).toBe(429);
+    });
+
+    test('bounds keys and removes expired buckets', async () => {
+        const security = createSecurity(config({
+            rateLimitMaxKeys: 2,
+            ipRateLimit: { limit: 1, windowMs: 20 },
+        }));
+        const app = application(security);
+        app.get('/protected', security.routes.protectedIpRateLimit, (context) => context.text('ok'));
+
+        expect((await app.fetch(...request('/protected', {}, '198.51.100.1'))).status).toBe(200);
+        expect((await app.fetch(...request('/protected', {}, '198.51.100.2'))).status).toBe(200);
+        expect((await app.fetch(...request('/protected', {}, '198.51.100.3'))).status).toBe(429);
+
+        await Bun.sleep(30);
+        expect((await app.fetch(...request('/protected', {}, '198.51.100.3'))).status).toBe(200);
+    });
+});
+
+describe('trusted client request and HTTPS', () => {
+    test('ignores forged forwarding headers from an untrusted direct peer', async () => {
+        const app = application(createSecurity(config({ trustedProxyCidrs: ['10.0.0.0/8'] })));
+        app.get('/request', (context) => context.json(context.get('clientRequest')));
+
+        const response = await app.fetch(...request('/request', {
+            headers: {
+                'X-Forwarded-For': '203.0.113.8',
+                'X-Forwarded-Proto': 'https',
+            },
+        }, '198.51.100.10'));
+        expect(await response.json()).toMatchObject({
+            ip: '198.51.100.10',
+            isSecure: false,
+            trustedProxy: false,
+        });
+    });
+
+    test('accepts one forwarded hop only from a configured proxy', async () => {
+        const app = application(createSecurity(config({ trustedProxyCidrs: ['10.0.0.0/8'] })));
+        app.get('/request', (context) => context.json(context.get('clientRequest')));
+
+        const response = await app.fetch(...request('/request', {
+            headers: {
+                'X-Forwarded-For': '203.0.113.8',
+                'X-Forwarded-Proto': 'https',
+            },
+        }, '10.4.5.6'));
+        expect(await response.json()).toMatchObject({
+            ip: '203.0.113.8',
+            isSecure: true,
+            directPeerAddress: '10.4.5.6',
+            trustedProxy: true,
+        });
+
+        const chained = await app.fetch(...request('/request', {
+            headers: { 'X-Forwarded-For': '203.0.113.8, 198.51.100.2' },
+        }, '10.4.5.6'));
+        expect((await chained.json() as { ip: string }).ip).toBe('10.4.5.6');
+    });
+
+    test('rejects insecure non-local requests and emits HSTS only for secure requests', async () => {
+        const security = createSecurity(config({ enforceHttps: true, trustedProxyCidrs: ['10.0.0.0/8'] }));
+        const app = application(security);
+        app.get('/request', (context) => context.text('ok'));
+
+        const insecure = await app.fetch(...request('/request', {}, '198.51.100.10'));
+        expect(insecure.status).toBe(400);
+        expect(insecure.headers.get('Strict-Transport-Security')).toBeNull();
+        expect(insecure.headers.get('X-Content-Type-Options')).toBe('nosniff');
+
+        const local = await app.fetch(...request('/request', {}, '127.0.0.1'));
+        expect(local.status).toBe(200);
+        expect(local.headers.get('Strict-Transport-Security')).toBeNull();
+
+        const forgedLocalForward = await app.fetch(...request('/request', {
+            headers: { 'X-Forwarded-For': '127.0.0.1' },
+        }, '10.4.5.6'));
+        expect(forgedLocalForward.status).toBe(400);
+
+        const secure = await app.fetch(...request('/request', {
+            headers: { 'X-Forwarded-Proto': 'https' },
+        }, '10.4.5.6'));
+        expect(secure.status).toBe(200);
+        expect(secure.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');
+        expect(secure.headers.get('Cache-Control')).toBe('no-store');
+        expect(secure.headers.get('Referrer-Policy')).toBe('no-referrer');
+    });
+});
+
+describe('sanitized errors', () => {
+    test('does not expose exception details', async () => {
+        const app = application();
+        app.get('/failure', () => {
+            throw new Error('database password should not be exposed');
+        });
+
+        const response = await app.fetch(...request('/failure'));
+        expect(response.status).toBe(500);
+        expect(await response.json()).toEqual({ error: 'Internal Server Error' });
+        expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    });
+});
