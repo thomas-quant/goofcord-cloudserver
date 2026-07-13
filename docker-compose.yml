@@ -1,7 +1,43 @@
-version: '3'
 services:
   goofcordcloud:
-    restart: always
-    build: .
+    build:
+      context: .
+    restart: unless-stopped
     ports:
-      - "${HOST_PORT}:${PORT}"
+      - "${HOST_PORT:-3000}:${PORT:-3000}"
+    environment:
+      CLIENT_ID: "${CLIENT_ID:-}"
+      CLIENT_SECRET: "${CLIENT_SECRET:-}"
+      REDIRECT_URI: "${REDIRECT_URI:-http://localhost:3000}"
+      MONGO_URI: "${MONGO_URI:-mongodb://mongo:27017/goofcord}"
+      PORT: "${PORT:-3000}"
+      MONGO_SERVER_SELECTION_TIMEOUT_MS: "${MONGO_SERVER_SELECTION_TIMEOUT_MS:-5000}"
+      MAX_REQUEST_BODY_BYTES: "${MAX_REQUEST_BODY_BYTES:-1048576}"
+      SESSION_TOUCH_INTERVAL_MS: "${SESSION_TOUCH_INTERVAL_MS:-900000}"
+      ENFORCE_HTTPS: "${ENFORCE_HTTPS:-false}"
+      TRUSTED_PROXY_CIDRS: "${TRUSTED_PROXY_CIDRS:-}"
+      RATE_LIMIT_MAX_KEYS: "${RATE_LIMIT_MAX_KEYS:-10000}"
+      IP_RATE_LIMIT: "${IP_RATE_LIMIT:-120}"
+      IP_RATE_WINDOW_MS: "${IP_RATE_WINDOW_MS:-60000}"
+      CALLBACK_RATE_LIMIT: "${CALLBACK_RATE_LIMIT:-20}"
+      CALLBACK_RATE_WINDOW_MS: "${CALLBACK_RATE_WINDOW_MS:-60000}"
+      SESSION_RATE_LIMIT: "${SESSION_RATE_LIMIT:-60}"
+      SESSION_RATE_WINDOW_MS: "${SESSION_RATE_WINDOW_MS:-60000}"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const port = process.env.PORT ?? '3000'; fetch(`http://127.0.0.1:$${port}/healthz`).then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  mongo:
+    image: mongo:8.0.15
+    profiles: ["dev-mongo"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo-development-data:/data/db
+
+volumes:
+  mongo-development-data:

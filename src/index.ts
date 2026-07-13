@@ -1,36 +1,49 @@
 import mongoose from 'mongoose';
-import { Hono } from "hono";
 import { loadConfig } from './config';
-import type { AppEnv } from './contracts';
-import { createV1Router } from './routes/v1';
-import { createDiscordOAuthService, createLegacyAuthenticationService, createLegacySettingsService } from './routes/v1Services';
-import { permissiveRouteSecurity } from './routes/routeSecurity';
-import v2 from './routes/v2';
+import { createAuthenticationService, initializeDataIndexes } from './auth';
+import { createSettingsService } from './services/settings';
+import { createSecurity } from './security';
+import { createDiscordOAuthService } from './routes/v1Services';
+import { createApplication } from './runtime/application';
+import { configureMongo } from './runtime/mongo';
+import { startRuntime, type RunningRuntime } from './runtime/server';
 
-const config = loadConfig();
+export async function startProductionServer(): Promise<RunningRuntime> {
+    // Parse all configuration before making any outbound connections.
+    const config = loadConfig();
+    configureMongo(mongoose);
 
-await mongoose.connect(config.mongoUri).catch(console.error);
-console.log('Connected to MongoDB');
+    const auth = createAuthenticationService({
+        sessionTouchIntervalMs: config.sessionTouchIntervalMs,
+    });
+    const settings = createSettingsService();
+    const security = createSecurity(config);
+    const oauth = createDiscordOAuthService(config);
 
-export const app = new Hono<AppEnv>();
+    const runtime = await startRuntime({
+        config,
+        mongo: mongoose,
+        initializeIndexes: initializeDataIndexes,
+        createApplication: (readiness) => createApplication({
+            clientId: config.clientId,
+            auth,
+            settings,
+            oauth,
+            security,
+            readiness,
+            mongoConnection: mongoose.connection,
+        }),
+        serve: (options) => Bun.serve(options),
+    });
 
-app.route('/v1', createV1Router({
-    clientId: config.clientId,
-    auth: createLegacyAuthenticationService(),
-    settings: createLegacySettingsService(),
-    oauth: createDiscordOAuthService(config),
-    security: permissiveRouteSecurity,
-}));
-app.route('/v2', v2);
+    console.log('Connected to MongoDB');
+    console.log(`Running at http://localhost:${config.port}`);
+    return runtime;
+}
 
-app.get('/', (c) => {
-    return c.redirect("https://codeberg.org/wuemeli/goofcord-cloudserver");
-})
-
-const port = config.port;
-console.log(`Running at http://localhost:${port}`)
-
-export default {
-    port,
-    fetch: app.fetch,
+if (import.meta.main) {
+    await startProductionServer().catch(() => {
+        console.error('Unable to start server.');
+        process.exitCode = 1;
+    });
 }

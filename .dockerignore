@@ -1,0 +1,22 @@
+# Runtime configuration and local credentials never belong in an image build.
+.env*
+
+# Source-control and local tooling state.
+.git
+.github
+.vscode
+.idea
+node_modules
+coverage
+.nyc_output
+*.log
+*.tsbuildinfo
+
+# Local checkouts/reference material outside this server project.
+GoofCord
+GoofCord/
+
+# Operating-system/editor scratch files.
+.DS_Store
+*.swp
+*~
