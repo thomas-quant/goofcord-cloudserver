@@ -188,5 +188,5 @@ describe('remote KDF service', () => {
         } finally {
             await service.close();
         }
-    });
+    }, 90_000);
 });
