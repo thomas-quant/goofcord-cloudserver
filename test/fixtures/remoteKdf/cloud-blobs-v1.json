@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "notice": "PUBLIC SYNTHETIC TEST DATA ONLY - NOT USER SETTINGS OR SECRETS",
+  "encrypted": {
+    "cloudEncryptionKey": "public-fixture-cloud-key-v1",
+    "saltHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "ivHex": "a0a1a2a3a4a5a6a7a8a9aaab",
+    "blob": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh+goaKjpKWmp6ipqquYDvPhRH9X5PT5kCYPAIdad0hO9HfXobBJUmppsjNO2/yABbuv/lZphUU5iCJz6WYw0AxkLPFQglsCqecrfvwPI84RZObJXxZt8Q625adj+FxwIB2Q2IfEpgwuy0NX+3ywxo71GUYfF4w6yJ/f6MsFdAMI/cKKRnnrDJk6IzxTQNyL/cxlbXNfjNyVbzstclkuLYUE44ZxGwR1ziH5/6+uz6dPRD0q/Bz+qMI=",
+    "expectedSettings": {
+      "_fixture": "PUBLIC SYNTHETIC TEST DATA - NOT USER SETTINGS",
+      "messageEncryption": true,
+      "encryptionPasswords": [
+        "goofcryptspikevector",
+        "  public synthetic café 🔐 password  "
+      ],
+      "encryptionCover": "public fixture cover"
+    }
+  },
+  "wrongKey": {
+    "cloudEncryptionKey": "public-fixture-wrong-cloud-key-v1",
+    "blob": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh+goaKjpKWmp6ipqquYDvPhRH9X5PT5kCYPAIdad0hO9HfXobBJUmppsjNO2/yABbuv/lZphUU5iCJz6WYw0AxkLPFQglsCqecrfvwPI84RZObJXxZt8Q625adj+FxwIB2Q2IfEpgwuy0NX+3ywxo71GUYfF4w6yJ/f6MsFdAMI/cKKRnnrDJk6IzxTQNyL/cxlbXNfjNyVbzstclkuLYUE44ZxGwR1ziH5/6+uz6dPRD0q/Bz+qMI=",
+    "expectedError": "CLOUD_DECRYPT_FAILED"
+  },
+  "passwordless": {
+    "blob": "G3gAAJwHdkzgym6oEqCpt23dcD0poREdO62G6IyQgqJiSSudvhSZotLJgdvh2/lyCqy2KOfcxr5bQUcEzfD/hr37uAIVF3futWUa+DO4CsUdau6EIzwGTfG3tkEwelOaMTLA5XHt3cc1iMQ=",
+    "expectedSettings": {
+      "_fixture": "PUBLIC SYNTHETIC PASSWORDLESS TEST DATA",
+      "messageEncryption": false,
+      "encryptionCover": "public fixture cover"
+    },
+    "expectedError": "PASSWORDS_NOT_SYNCED"
+  },
+  "malformed": [
+    {
+      "name": "noncanonical-base64",
+      "blob": "****not-base64****",
+      "expectedError": "INVALID_REQUEST"
+    },
+    {
+      "name": "short-encrypted-layout",
+      "blob": "AA==",
+      "expectedError": "CLOUD_DECRYPT_FAILED"
+    }
+  ]
+}

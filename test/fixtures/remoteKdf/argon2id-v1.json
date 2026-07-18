@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "algorithm": "argon2id",
+  "argonVersion": 19,
+  "memoryKiB": 65536,
+  "passes": 3,
+  "parallelism": 1,
+  "outputBytes": 32,
+  "passwordEncoding": "utf8-exact-no-normalization",
+  "saltEncoding": "utf8-exact-no-normalization",
+  "password": "goofcryptspikevector",
+  "channelId": "1234567890123456789",
+  "keyHex": "58d45319392fae3bbe13098083598211e9b7e84d38d210b014a56444e2cde804",
+  "keyBase64": "WNRTGTkvrju+EwmAg1mCEem36E040hCwFKVkROLN6AQ="
+}

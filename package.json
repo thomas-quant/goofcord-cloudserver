@@ -14,6 +14,7 @@
     "typescript": "5.6.2"
   },
   "dependencies": {
+    "@noble/hashes": "1.8.0",
     "discord-oauth2": "github:clementvt/discord-oauth2#fix-clement",
     "hono": "^4.7.10",
     "mongoose": "^8.15.0"
