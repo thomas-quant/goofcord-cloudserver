@@ -23,6 +23,9 @@ services:
       CALLBACK_RATE_WINDOW_MS: "${CALLBACK_RATE_WINDOW_MS:-60000}"
       SESSION_RATE_LIMIT: "${SESSION_RATE_LIMIT:-60}"
       SESSION_RATE_WINDOW_MS: "${SESSION_RATE_WINDOW_MS:-60000}"
+      KDF_GLOBAL_CONCURRENCY: "${KDF_GLOBAL_CONCURRENCY:-1}"
+      KDF_JOB_TIMEOUT_MS: "${KDF_JOB_TIMEOUT_MS:-30000}"
+      KDF_ALLOW_INSECURE_LOCALHOST: "${KDF_ALLOW_INSECURE_LOCALHOST:-false}"
     healthcheck:
       test: ["CMD", "bun", "-e", "const port = process.env.PORT ?? '3000'; fetch(`http://127.0.0.1:$${port}/healthz`).then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 30s

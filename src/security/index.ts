@@ -9,12 +9,19 @@ import type {
     RouteSecurity,
     SecurityService,
 } from '../contracts';
+import {
+    MAX_KDF_REQUEST_BODY_BYTES,
+    kdfErrorResponse,
+} from '../kdf/contracts';
 
 const PAYLOAD_TOO_LARGE = 'Payload Too Large';
 const BAD_REQUEST = 'Bad Request';
 const TOO_MANY_REQUESTS = 'Too Many Requests';
 const HTTPS_REQUIRED = 'HTTPS Required';
 const INTERNAL_SERVER_ERROR = 'Internal Server Error';
+const KDF_IP_RATE = { limit: 12, windowMs: 60_000 } as const;
+const KDF_DERIVE_SESSION_RATE = { limit: 4, windowMs: 60_000 } as const;
+const KDF_REVISION_SESSION_RATE = { limit: 12, windowMs: 60_000 } as const;
 
 type IpAddress = {
     family: 4 | 6;
@@ -31,6 +38,10 @@ type RateLimitEntry = {
 export type JsonBodyResult<T> =
     | { ok: true; value: T }
     | { ok: false };
+
+export interface SecurityOptions {
+    now?: () => number;
+}
 
 /**
  * Reads JSON without exposing parser details to a response. Route handlers can
@@ -49,17 +60,21 @@ export async function readJsonBody<T>(context: Context<AppEnv>): Promise<JsonBod
  * in TRUSTED_PROXY_CIDRS and it may supply exactly one X-Forwarded-For address
  * plus one X-Forwarded-Proto value. Comma-separated proxy chains are ignored.
  */
-export function createSecurity(config: AppConfig): SecurityService {
+export function createSecurity(config: AppConfig, options: SecurityOptions = {}): SecurityService {
+    const now = options.now ?? Date.now;
     const trustedProxyCidrs = config.trustedProxyCidrs
         .map(parseCidr)
         .filter((cidr): cidr is Cidr => cidr !== null);
 
-    const ipLimiter = new InMemoryRateLimiter(config.ipRateLimit, config.rateLimitMaxKeys);
-    const callbackLimiter = new InMemoryRateLimiter(config.callbackRateLimit, config.rateLimitMaxKeys);
-    const sessionLimiter = new InMemoryRateLimiter(config.sessionRateLimit, config.rateLimitMaxKeys);
+    const ipLimiter = new InMemoryRateLimiter(config.ipRateLimit, config.rateLimitMaxKeys, now);
+    const callbackLimiter = new InMemoryRateLimiter(config.callbackRateLimit, config.rateLimitMaxKeys, now);
+    const sessionLimiter = new InMemoryRateLimiter(config.sessionRateLimit, config.rateLimitMaxKeys, now);
+    const kdfIpLimiter = new InMemoryRateLimiter(KDF_IP_RATE, config.rateLimitMaxKeys, now);
+    const kdfDeriveSessionLimiter = new InMemoryRateLimiter(KDF_DERIVE_SESSION_RATE, config.rateLimitMaxKeys, now);
+    const kdfRevisionSessionLimiter = new InMemoryRateLimiter(KDF_REVISION_SESSION_RATE, config.rateLimitMaxKeys, now);
 
     const resolveClientRequest: ApplicationSecurity['resolveClientRequest'] = async (context, next) => {
-        const directPeerAddress = normalizeIp(context.env.directPeerAddress);
+        const directPeerAddress = normalizeIp(context.env?.directPeerAddress);
         const directPeer = directPeerAddress ? parseIp(directPeerAddress) : null;
         const trustedProxy = directPeer !== null && trustedProxyCidrs.some((cidr) => matchesCidr(directPeer, cidr));
 
@@ -84,6 +99,14 @@ export function createSecurity(config: AppConfig): SecurityService {
 
     const enforceHttps: ApplicationSecurity['enforceHttps'] = async (context, next) => {
         const request = context.get('clientRequest');
+        if (
+            isKdfPath(context.req.path)
+            && !request.isSecure
+            && !(request.isLocal && config.kdfAllowInsecureLocalhost)
+        ) {
+            applyBaseSecurityHeaders(context);
+            return context.json(kdfErrorResponse('INVALID_REQUEST'), 400);
+        }
         if (config.enforceHttps && !request.isSecure && !request.isLocal) {
             applyBaseSecurityHeaders(context);
             return context.json({ error: HTTPS_REQUIRED }, 400);
@@ -102,6 +125,10 @@ export function createSecurity(config: AppConfig): SecurityService {
     };
 
     const onError: ApplicationSecurity['onError'] = (error, context) => {
+        if (isKdfPath(context.req.path)) {
+            applyBaseSecurityHeaders(context);
+            return context.json(kdfErrorResponse('KDF_FAILED'), 500);
+        }
         if (error instanceof SyntaxError) {
             return context.json({ error: BAD_REQUEST }, 400);
         }
@@ -152,6 +179,42 @@ export function createSecurity(config: AppConfig): SecurityService {
         await next();
     };
 
+    const kdfBodyLimit: RouteSecurity['kdfBodyLimit'] = async (context, next) => {
+        const rawRequest = context.req.raw;
+        const declaredLength = contentLength(rawRequest.headers.get('content-length'));
+        if (declaredLength !== null && declaredLength > MAX_KDF_REQUEST_BODY_BYTES) {
+            return context.json(kdfErrorResponse('INVALID_REQUEST'), 400);
+        }
+        if (!rawRequest.body) return next();
+
+        try {
+            const body = await readBodyWithinLimit(rawRequest.body, MAX_KDF_REQUEST_BODY_BYTES);
+            if (body === null) return context.json(kdfErrorResponse('INVALID_REQUEST'), 400);
+            context.req.raw = new Request(rawRequest, { body });
+            await next();
+        } catch {
+            return context.json(kdfErrorResponse('INVALID_REQUEST'), 400);
+        }
+    };
+
+    const kdfIpRateLimit: RouteSecurity['kdfIpRateLimit'] = async (context, next) => {
+        const limited = kdfIpLimiter.limit(context.get('clientRequest').ip);
+        if (limited !== null) return kdfRateLimitResponse(context, limited);
+        await next();
+    };
+
+    const kdfDeriveSessionRateLimit: RouteSecurity['kdfDeriveSessionRateLimit'] = async (context, next) => {
+        const limited = kdfDeriveSessionLimiter.limit(context.get('authenticatedSession').tokenHash);
+        if (limited !== null) return kdfRateLimitResponse(context, limited);
+        await next();
+    };
+
+    const kdfRevisionSessionRateLimit: RouteSecurity['kdfRevisionSessionRateLimit'] = async (context, next) => {
+        const limited = kdfRevisionSessionLimiter.limit(context.get('authenticatedSession').tokenHash);
+        if (limited !== null) return kdfRateLimitResponse(context, limited);
+        await next();
+    };
+
     return {
         application: {
             resolveClientRequest,
@@ -164,6 +227,10 @@ export function createSecurity(config: AppConfig): SecurityService {
             protectedIpRateLimit,
             callbackIpRateLimit,
             sessionRateLimit,
+            kdfBodyLimit,
+            kdfIpRateLimit,
+            kdfDeriveSessionRateLimit,
+            kdfRevisionSessionRateLimit,
         },
     };
 }
@@ -174,11 +241,12 @@ class InMemoryRateLimiter {
     constructor(
         private readonly config: RateLimitConfig,
         private readonly maxKeys: number,
+        private readonly now: () => number,
     ) {}
 
     /** Returns milliseconds until retry, or null when the request is allowed. */
     limit(key: string): number | null {
-        const now = Date.now();
+        const now = this.now();
         this.removeExpired(now);
 
         const existing = this.entries.get(key);
@@ -189,7 +257,7 @@ class InMemoryRateLimiter {
         }
 
         if (this.entries.size >= this.maxKeys) {
-            return this.earliestResetAt() - now;
+            return this.earliestResetAt(now) - now;
         }
 
         this.entries.set(key, { count: 1, resetAt: now + this.config.windowMs });
@@ -202,16 +270,25 @@ class InMemoryRateLimiter {
         }
     }
 
-    private earliestResetAt(): number {
+    private earliestResetAt(now: number): number {
         let earliest = Number.POSITIVE_INFINITY;
         for (const entry of this.entries.values()) earliest = Math.min(earliest, entry.resetAt);
-        return Number.isFinite(earliest) ? earliest : Date.now() + this.config.windowMs;
+        return Number.isFinite(earliest) ? earliest : now + this.config.windowMs;
     }
 }
 
 function rateLimitResponse(context: Context<AppEnv>, retryInMs: number): Response {
     context.header('Retry-After', String(Math.max(1, Math.ceil(Math.max(0, retryInMs) / 1_000))));
     return context.json({ error: TOO_MANY_REQUESTS }, 429);
+}
+
+function kdfRateLimitResponse(context: Context<AppEnv>, retryInMs: number): Response {
+    context.header('Retry-After', String(Math.max(1, Math.ceil(Math.max(0, retryInMs) / 1_000))));
+    return context.json(kdfErrorResponse('KDF_BUSY'), 429);
+}
+
+function isKdfPath(path: string): boolean {
+    return path === '/v2/kdf' || path.startsWith('/v2/kdf/');
 }
 
 function applyBaseSecurityHeaders(context: Context<AppEnv>): void {

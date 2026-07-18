@@ -11,11 +11,28 @@ This hardening work assumes a **clean start**: use a new, empty MongoDB database
 3. Run `bun install --frozen-lockfile`, then `bun run start`.
 4. Check `GET /healthz`. It returns `200 OK` only after index initialization and while MongoDB is connected; otherwise it returns `503` without diagnostic details.
 
-The service deliberately does not listen if its initial MongoDB connection fails. On `SIGTERM` or `SIGINT`, it stops accepting connections before disconnecting from MongoDB.
+The service deliberately does not listen if its initial MongoDB connection, index setup, or remote-KDF vector self-test fails. On `SIGTERM` or `SIGINT`, it stops accepting connections, closes KDF workers, then disconnects from MongoDB.
 
 ## Configuration
 
-`.env.example` documents every runtime setting. The safe defaults are a 1 MiB `/save` body limit, a five-second MongoDB server-selection timeout, bounded in-memory rate-limit keys, and a 15-minute session-activity update interval. `PORT` and all numeric limits are validated at startup.
+`.env.example` documents every runtime setting. The safe defaults are a 1 MiB `/save` body limit, a five-second MongoDB server-selection timeout, bounded in-memory rate-limit keys, a 15-minute session-activity update interval, and one remote-KDF worker. `PORT` and all numeric limits are validated at startup.
+
+### Remote KDF resource policy
+
+The authenticated `/v2/kdf/derive` boundary decrypts the caller's existing GoofCord cloud blob only in memory and returns ordered channel keys. It never accepts a client account ID, writes settings/session activity, caches passwords or keys, or logs request/response secrets. Startup self-tests every worker against the committed exact Argon2 vector before the server listens or reports ready.
+
+| Control | Fixed/default value |
+|---|---|
+| Derive request body | 4,096 bytes maximum |
+| Worker count | `KDF_GLOBAL_CONCURRENCY=1`, validated range 1-4 |
+| Worker job/self-test timeout | `KDF_JOB_TIMEOUT_MS=30000`, validated range 5,000-120,000 ms |
+| Shared KDF IP rate | 12 requests per 60,000 ms |
+| Derive token-hash rate | 4 requests per 60,000 ms |
+| Revision token-hash rate | 12 requests per 60,000 ms |
+| GoofCord scrypt allowance | `maxmem=268435456` bytes with fixed `N=32768,r=8,p=3` |
+| Brotli output | asynchronous `maxOutputLength=262144` bytes |
+
+Each active Argon worker consumes 64 MiB plus cloud-decoding and managed-runtime overhead. Size `KDF_GLOBAL_CONCURRENCY` from the container's real memory limit, not CPU count. A failed worker is quarantined and gets exactly one immediate vector-tested replacement attempt; a failed replacement stays unavailable without a retry loop until restart.
 
 Do not commit `.env`, OAuth secrets, MongoDB credentials, tokens, or database dumps. The Docker build excludes local environment files and checkouts.
 
@@ -36,7 +53,7 @@ No helper stops or removes a pre-existing generic MongoDB container. To remove t
 
 For deployed mode, terminate TLS at a reverse proxy and set `ENFORCE_HTTPS=true`. Set `TRUSTED_PROXY_CIDRS` to only the proxy addresses or networks, and ensure the Bun service is reachable solely from that proxy or a private container network. The server only honors `X-Forwarded-For` and `X-Forwarded-Proto` when the direct Bun peer is trusted. Its trusted-proxy policy accepts exactly one forwarded client address and one forwarded protocol value; comma-separated forwarding chains are ignored. Trusting forwarded headers while allowing direct public access permits clients to spoof them.
 
-Local HTTP is supported only when HTTPS enforcement is explicitly disabled. With enforcement enabled, insecure non-local requests are rejected; responses known to be HTTPS receive HSTS.
+Remote-KDF endpoints require trustworthy HTTPS regardless of `ENFORCE_HTTPS`. For development only, `KDF_ALLOW_INSECURE_LOCALHOST=true` permits direct loopback HTTP; proxy-forwarded clients can never claim this exception. Other endpoints retain the existing `ENFORCE_HTTPS` behavior. With enforcement enabled, insecure non-local requests are rejected; responses known to be HTTPS receive HSTS.
 
 Any reachable MongoDB deployment needs authentication, a least-privileged application user, network isolation, and TLS whenever traffic crosses an untrusted network. Put its credential-bearing URI in runtime configuration, never in an image or source file.
 

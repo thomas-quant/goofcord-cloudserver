@@ -13,6 +13,7 @@ export interface SignalProcess {
 
 export function createShutdown(
     server: StoppableServer,
+    shutdownKdf: () => Promise<void>,
     mongo: Pick<MongoRuntime, 'disconnect'>,
     readiness: Readiness,
 ): () => Promise<void> {
@@ -21,8 +22,23 @@ export function createShutdown(
     return () => {
         shutdownPromise ??= (async () => {
             readiness.markNotReady();
-            await server.stop(false);
-            await mongo.disconnect();
+            let failure: unknown;
+            try {
+                await server.stop(false);
+            } catch (error) {
+                failure = error;
+            }
+            try {
+                await shutdownKdf();
+            } catch (error) {
+                failure ??= error;
+            }
+            try {
+                await mongo.disconnect();
+            } catch (error) {
+                failure ??= error;
+            }
+            if (failure) throw failure;
         })();
         return shutdownPromise;
     };

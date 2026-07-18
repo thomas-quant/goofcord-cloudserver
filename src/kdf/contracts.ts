@@ -6,6 +6,7 @@ export const MAX_PASSWORD_SLOTS = 8;
 export const MAX_PASSWORD_UTF8_BYTES = 256;
 export const MAX_STORED_BLOB_BYTES = 1024 * 1024;
 export const MAX_DECOMPRESSED_SETTINGS_BYTES = 256 * 1024;
+export const MAX_KDF_REQUEST_BODY_BYTES = 4096;
 
 export const KDF_ERROR_CODES = [
     'INVALID_REQUEST',
@@ -54,6 +55,22 @@ export interface KdfRevisionResponse {
 export interface KdfErrorResponse {
     version: 1;
     error: { code: KdfErrorCode };
+}
+
+/** Code-only domain failure: never attach request or caught-error material. */
+export class KdfError extends Error {
+    constructor(readonly code: KdfErrorCode) {
+        super(code);
+        this.name = 'KdfError';
+    }
+}
+
+export function isKdfError(value: unknown): value is KdfError {
+    return value instanceof KdfError;
+}
+
+export function kdfErrorResponse(code: KdfErrorCode): KdfErrorResponse {
+    return { version: REMOTE_KDF_VERSION, error: { code } };
 }
 
 export type KdfContractResult<T> =

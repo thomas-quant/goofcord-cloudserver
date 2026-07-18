@@ -20,6 +20,9 @@ export interface AppConfig {
     ipRateLimit: RateLimitConfig;
     callbackRateLimit: RateLimitConfig;
     sessionRateLimit: RateLimitConfig;
+    kdfGlobalConcurrency: number;
+    kdfJobTimeoutMs: number;
+    kdfAllowInsecureLocalhost: boolean;
 }
 
 type Environment = Record<string, string | undefined>;
@@ -136,5 +139,8 @@ export function loadConfig(environment: Environment = process.env): AppConfig {
         ipRateLimit: rateLimit(environment, 'IP_RATE', { limit: 120, windowMs: 60_000 }),
         callbackRateLimit: rateLimit(environment, 'CALLBACK_RATE', { limit: 20, windowMs: 60_000 }),
         sessionRateLimit: rateLimit(environment, 'SESSION_RATE', { limit: 60, windowMs: 60_000 }),
+        kdfGlobalConcurrency: integer(environment, 'KDF_GLOBAL_CONCURRENCY', 1, 1, 4),
+        kdfJobTimeoutMs: integer(environment, 'KDF_JOB_TIMEOUT_MS', 30_000, 5_000, 120_000),
+        kdfAllowInsecureLocalhost: boolean(environment, 'KDF_ALLOW_INSECURE_LOCALHOST', false),
     };
 }

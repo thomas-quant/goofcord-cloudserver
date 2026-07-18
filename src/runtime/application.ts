@@ -8,7 +8,8 @@ import type {
     SettingsService,
 } from '../contracts';
 import { createV1Router } from '../routes/v1';
-import v2 from '../routes/v2';
+import { createV2Router } from '../routes/v2';
+import type { RemoteKdfService } from '../kdf/service';
 
 import type { MongoConnectionState, Readiness } from './readiness';
 import { isReady } from './readiness';
@@ -19,6 +20,7 @@ export interface ApplicationDependencies {
     settings: SettingsService;
     oauth: OAuthService;
     security: SecurityService;
+    kdf: RemoteKdfService;
     readiness: Readiness;
     mongoConnection: MongoConnectionState;
 }
@@ -50,7 +52,12 @@ export function createApplication(dependencies: ApplicationDependencies): Hono<A
         oauth: dependencies.oauth,
         security: dependencies.security.routes,
     }));
-    app.route('/v2', v2);
+    app.route('/v2', createV2Router({
+        auth: dependencies.auth,
+        settings: dependencies.settings,
+        security: dependencies.security.routes,
+        kdf: dependencies.kdf,
+    }));
 
     app.get('/', (context) => context.redirect('https://codeberg.org/wuemeli/goofcord-cloudserver'));
 

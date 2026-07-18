@@ -13,6 +13,9 @@ function createSecureApplication() {
         authenticate: async (rawAuthorization) => rawAuthorization === 'raw-client-token'
             ? { userId: 'discord-user', tokenHash: 'b'.repeat(64) }
             : null,
+        authenticateReadOnly: async (rawAuthorization) => rawAuthorization === 'raw-client-token'
+            ? { userId: 'discord-user', tokenHash: 'b'.repeat(64) }
+            : null,
         createSession: async () => '0123456789abcdef0123456789abcdef',
         revokeAllSessions: async () => undefined,
     };
@@ -45,6 +48,12 @@ function createSecureApplication() {
         settings: settingsService,
         oauth,
         security: createSecurity(config),
+        kdf: {
+            initialize: async () => undefined,
+            derive: async () => { throw new Error('unused'); },
+            revision: () => ({ version: 1, settingsRevision: 'A'.repeat(43) }),
+            close: async () => undefined,
+        },
         readiness,
         mongoConnection: { readyState: 1 },
     });

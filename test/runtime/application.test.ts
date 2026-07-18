@@ -26,6 +26,10 @@ function createSecurity(): SecurityService {
             protectedIpRateLimit: continueRequest,
             callbackIpRateLimit: continueRequest,
             sessionRateLimit: continueRequest,
+            kdfBodyLimit: continueRequest,
+            kdfIpRateLimit: continueRequest,
+            kdfDeriveSessionRateLimit: continueRequest,
+            kdfRevisionSessionRateLimit: continueRequest,
         },
     };
 }
@@ -33,6 +37,7 @@ function createSecurity(): SecurityService {
 function createApplicationDependencies(readyState: number) {
     const auth: AuthenticationService = {
         authenticate: async () => null,
+        authenticateReadOnly: async () => null,
         createSession: async () => '0123456789abcdef0123456789abcdef',
         revokeAllSessions: async () => undefined,
     };
@@ -54,6 +59,12 @@ function createApplicationDependencies(readyState: number) {
             settings,
             oauth,
             security: createSecurity(),
+            kdf: {
+                initialize: async () => undefined,
+                derive: async () => { throw new Error('unused'); },
+                revision: () => ({ version: 1 as const, settingsRevision: 'A'.repeat(43) }),
+                close: async () => undefined,
+            },
             readiness,
             mongoConnection: { readyState },
         },
@@ -81,6 +92,10 @@ describe('readiness endpoint', () => {
                 protectedIpRateLimit: record('protectedIpRateLimit'),
                 callbackIpRateLimit: continueRequest,
                 sessionRateLimit: continueRequest,
+                kdfBodyLimit: continueRequest,
+                kdfIpRateLimit: continueRequest,
+                kdfDeriveSessionRateLimit: continueRequest,
+                kdfRevisionSessionRateLimit: continueRequest,
             },
         };
         readiness.markReady();

@@ -10,4 +10,8 @@ export const permissiveRouteSecurity: RouteSecurity = {
     protectedIpRateLimit: continueRequest,
     callbackIpRateLimit: continueRequest,
     sessionRateLimit: continueRequest,
+    kdfBodyLimit: continueRequest,
+    kdfIpRateLimit: continueRequest,
+    kdfDeriveSessionRateLimit: continueRequest,
+    kdfRevisionSessionRateLimit: continueRequest,
 };

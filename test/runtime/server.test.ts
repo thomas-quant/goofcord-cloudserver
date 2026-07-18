@@ -42,6 +42,8 @@ describe('runtime lifecycle', () => {
             config: loadConfig(validEnvironment()),
             mongo,
             initializeIndexes: async () => undefined,
+            initializeKdf: async () => undefined,
+            shutdownKdf: async () => undefined,
             createApplication: () => ({ fetch: () => new Response('unused') }),
             serve: () => {
                 served = true;
@@ -67,6 +69,12 @@ describe('runtime lifecycle', () => {
             initializeIndexes: async () => {
                 calls.push('indexes');
             },
+            initializeKdf: async () => {
+                calls.push('kdf');
+            },
+            shutdownKdf: async () => {
+                calls.push('kdf-close');
+            },
             createApplication: () => ({
                 fetch: (_request, receivedBindings) => {
                     bindings = receivedBindings;
@@ -82,7 +90,7 @@ describe('runtime lifecycle', () => {
         });
 
         expect(mongo.calls).toEqual(['connect']);
-        expect(calls).toEqual(['indexes', 'serve']);
+        expect(calls).toEqual(['indexes', 'kdf', 'serve']);
         expect(options?.port).toBe(3000);
         expect(options?.maxRequestBodySize).toBe(4321);
 
@@ -99,6 +107,8 @@ describe('runtime lifecycle', () => {
             config: loadConfig(validEnvironment()),
             mongo,
             initializeIndexes: async () => undefined,
+            initializeKdf: async () => undefined,
+            shutdownKdf: async () => undefined,
             createApplication: () => ({ fetch: () => new Response('ok') }),
             serve: () => server,
             installSignals: () => () => undefined,
@@ -119,6 +129,8 @@ describe('runtime lifecycle', () => {
             config: loadConfig(validEnvironment()),
             mongo,
             initializeIndexes: async () => undefined,
+            initializeKdf: async () => undefined,
+            shutdownKdf: async () => undefined,
             createApplication: () => ({ fetch: () => new Response('ok') }),
             serve: () => server,
             installSignals: () => {
@@ -128,5 +140,93 @@ describe('runtime lifecycle', () => {
 
         expect(server.stopped).toBe(true);
         expect(mongo.calls).toEqual(['connect', 'disconnect']);
+    });
+
+    test('refuses to listen and closes KDF state when startup self-test fails', async () => {
+        const mongo = createMongo();
+        const calls: string[] = [];
+        let served = false;
+
+        await expect(startRuntime({
+            config: loadConfig(validEnvironment()),
+            mongo,
+            initializeIndexes: async () => {
+                calls.push('indexes');
+            },
+            initializeKdf: async () => {
+                calls.push('kdf');
+                throw new Error('KDF vector mismatch');
+            },
+            shutdownKdf: async () => {
+                calls.push('kdf-close');
+            },
+            createApplication: () => ({ fetch: () => new Response('unused') }),
+            serve: () => {
+                served = true;
+                return createServer();
+            },
+            installSignals: () => () => undefined,
+        })).rejects.toThrow('KDF vector mismatch');
+
+        expect(calls).toEqual(['indexes', 'kdf', 'kdf-close']);
+        expect(served).toBe(false);
+        expect(mongo.calls).toEqual(['connect', 'disconnect']);
+    });
+
+    test('shutdown order is unready, stop accepting, close KDF, then disconnect Mongo', async () => {
+        const events: string[] = [];
+        const mongo = createMongo();
+        mongo.disconnect = async () => {
+            events.push('mongo');
+        };
+        const server = createServer();
+        server.stop = async () => {
+            events.push('server');
+        };
+        const runtime = await startRuntime({
+            config: loadConfig(validEnvironment()),
+            mongo,
+            initializeIndexes: async () => undefined,
+            initializeKdf: async () => undefined,
+            shutdownKdf: async () => {
+                events.push('kdf');
+            },
+            createApplication: () => ({ fetch: () => new Response('ok') }),
+            serve: () => server,
+            installSignals: () => () => undefined,
+        });
+
+        await Promise.all([runtime.shutdown(), runtime.shutdown()]);
+        expect(runtime.readiness.isReady()).toBe(false);
+        expect(events).toEqual(['server', 'kdf', 'mongo']);
+    });
+
+    test('continues KDF and Mongo cleanup when stopping the listener fails', async () => {
+        const events: string[] = [];
+        const mongo = createMongo();
+        mongo.disconnect = async () => {
+            events.push('mongo');
+        };
+        const server = createServer();
+        server.stop = async () => {
+            events.push('server');
+            throw new Error('stop failed');
+        };
+        const runtime = await startRuntime({
+            config: loadConfig(validEnvironment()),
+            mongo,
+            initializeIndexes: async () => undefined,
+            initializeKdf: async () => undefined,
+            shutdownKdf: async () => {
+                events.push('kdf');
+            },
+            createApplication: () => ({ fetch: () => new Response('ok') }),
+            serve: () => server,
+            installSignals: () => () => undefined,
+        });
+
+        await expect(runtime.shutdown()).rejects.toThrow('stop failed');
+        expect(events).toEqual(['server', 'kdf', 'mongo']);
+        expect(runtime.readiness.isReady()).toBe(false);
     });
 });

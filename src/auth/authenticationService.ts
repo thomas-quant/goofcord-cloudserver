@@ -31,6 +31,10 @@ function sessionSort(): Record<keyof Pick<UserSession, 'lastUsedAt' | 'createdAt
     return { lastUsedAt: -1, createdAt: -1, tokenHash: 1 };
 }
 
+interface FoundSession extends AuthenticatedSession {
+    lastUsedAt: Date | undefined;
+}
+
 class MongooseAuthenticationService implements AuthenticationService {
     constructor(
         private readonly userModel: Model<UserDocument>,
@@ -40,23 +44,16 @@ class MongooseAuthenticationService implements AuthenticationService {
     ) {}
 
     async authenticate(rawAuthorization: string): Promise<AuthenticatedSession | null> {
-        const tokenHash = hashToken(rawAuthorization);
-        const user = await this.userModel
-            .findOne(
-                { 'sessions.tokenHash': tokenHash },
-                { _id: 0, userId: 1, sessions: { $elemMatch: { tokenHash } } },
-            )
-            .lean();
+        const found = await this.findSession(rawAuthorization);
+        if (!found) return null;
 
-        if (!user) return null;
-
+        const { userId, tokenHash, lastUsedAt } = found;
         const now = this.now();
         const staleBefore = new Date(now.getTime() - this.sessionTouchIntervalMs);
-        const matchedSession = user.sessions[0];
-        if (matchedSession?.lastUsedAt < staleBefore) {
+        if (lastUsedAt && lastUsedAt < staleBefore) {
             await this.userModel.updateOne(
                 {
-                    userId: user.userId,
+                    userId,
                     sessions: {
                         $elemMatch: {
                             tokenHash,
@@ -68,7 +65,25 @@ class MongooseAuthenticationService implements AuthenticationService {
             );
         }
 
-        return { userId: user.userId, tokenHash };
+        return { userId, tokenHash };
+    }
+
+    async authenticateReadOnly(rawAuthorization: string): Promise<AuthenticatedSession | null> {
+        const found = await this.findSession(rawAuthorization);
+        return found ? { userId: found.userId, tokenHash: found.tokenHash } : null;
+    }
+
+    private async findSession(rawAuthorization: string): Promise<FoundSession | null> {
+        const tokenHash = hashToken(rawAuthorization);
+        const user = await this.userModel
+            .findOne(
+                { 'sessions.tokenHash': tokenHash },
+                { _id: 0, userId: 1, sessions: { $elemMatch: { tokenHash } } },
+            )
+            .lean();
+
+        if (!user) return null;
+        return { userId: user.userId, tokenHash, lastUsedAt: user.sessions[0]?.lastUsedAt };
     }
 
     async createSession(userId: string): Promise<string> {

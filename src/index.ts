@@ -7,6 +7,8 @@ import { createDiscordOAuthService } from './routes/v1Services';
 import { createApplication } from './runtime/application';
 import { configureMongo } from './runtime/mongo';
 import { startRuntime, type RunningRuntime } from './runtime/server';
+import { createKdfWorkerPool } from './kdf/pool';
+import { createRemoteKdfService } from './kdf/service';
 
 export async function startProductionServer(): Promise<RunningRuntime> {
     // Parse all configuration before making any outbound connections.
@@ -19,17 +21,24 @@ export async function startProductionServer(): Promise<RunningRuntime> {
     const settings = createSettingsService();
     const security = createSecurity(config);
     const oauth = createDiscordOAuthService(config);
+    const kdf = createRemoteKdfService(createKdfWorkerPool({
+        capacity: config.kdfGlobalConcurrency,
+        jobTimeoutMs: config.kdfJobTimeoutMs,
+    }));
 
     const runtime = await startRuntime({
         config,
         mongo: mongoose,
         initializeIndexes: initializeDataIndexes,
+        initializeKdf: () => kdf.initialize(),
+        shutdownKdf: () => kdf.close(),
         createApplication: (readiness) => createApplication({
             clientId: config.clientId,
             auth,
             settings,
             oauth,
             security,
+            kdf,
             readiness,
             mongoConnection: mongoose.connection,
         }),

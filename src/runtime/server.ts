@@ -19,6 +19,8 @@ export interface RuntimeDependencies {
     config: AppConfig;
     mongo: MongoRuntime;
     initializeIndexes(): Promise<void>;
+    initializeKdf(): Promise<void>;
+    shutdownKdf(): Promise<void>;
     createApplication(readiness: Readiness): { fetch(request: Request, bindings?: { directPeerAddress?: string }): Response | Promise<Response> };
     serve(options: ServeOptions): DirectPeerServer;
     installSignals?: (shutdown: () => Promise<void>) => () => void;
@@ -43,6 +45,7 @@ export async function startRuntime(dependencies: RuntimeDependencies): Promise<R
     try {
         await connectMongo(mongo, config);
         await dependencies.initializeIndexes();
+        await dependencies.initializeKdf();
 
         const application = dependencies.createApplication(readiness);
         server = dependencies.serve({
@@ -53,7 +56,7 @@ export async function startRuntime(dependencies: RuntimeDependencies): Promise<R
                 return application.fetch(request, { directPeerAddress });
             },
         });
-        const shutdown = createShutdown(server, mongo, readiness);
+        const shutdown = createShutdown(server, dependencies.shutdownKdf, mongo, readiness);
         const disposeSignalHandlers = (dependencies.installSignals
             ?? ((handler) => installShutdownHandlers(handler)))(shutdown);
 
@@ -62,6 +65,7 @@ export async function startRuntime(dependencies: RuntimeDependencies): Promise<R
     } catch (error) {
         readiness.markNotReady();
         if (server) await Promise.resolve(server.stop(false)).catch(() => undefined);
+        await dependencies.shutdownKdf().catch(() => undefined);
         await mongo.disconnect().catch(() => undefined);
         throw error;
     }

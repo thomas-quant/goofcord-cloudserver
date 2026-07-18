@@ -19,6 +19,11 @@ function createDependencies(): V1Dependencies & { saved: Map<string, string>; de
                 ? { userId: 'discord-user', tokenHash: 'a'.repeat(64) }
                 : null;
         },
+        async authenticateReadOnly(rawAuthorization) {
+            return rawAuthorization === 'raw-client-token'
+                ? { userId: 'discord-user', tokenHash: 'a'.repeat(64) }
+                : null;
+        },
         async createSession() {
             return '0123456789abcdef0123456789abcdef';
         },

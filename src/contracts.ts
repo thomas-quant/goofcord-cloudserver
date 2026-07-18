@@ -25,6 +25,7 @@ export type AppEnv = {
 
 export interface AuthenticationService {
     authenticate(rawAuthorization: string): Promise<AuthenticatedSession | null>;
+    authenticateReadOnly(rawAuthorization: string): Promise<AuthenticatedSession | null>;
     createSession(userId: string): Promise<string>;
     revokeAllSessions(userId: string): Promise<void>;
 }
@@ -49,6 +50,10 @@ export interface RouteSecurity {
     protectedIpRateLimit: MiddlewareHandler<AppEnv>;
     callbackIpRateLimit: MiddlewareHandler<AppEnv>;
     sessionRateLimit: MiddlewareHandler<AppEnv>;
+    kdfBodyLimit: MiddlewareHandler<AppEnv>;
+    kdfIpRateLimit: MiddlewareHandler<AppEnv>;
+    kdfDeriveSessionRateLimit: MiddlewareHandler<AppEnv>;
+    kdfRevisionSessionRateLimit: MiddlewareHandler<AppEnv>;
 }
 
 export interface ApplicationSecurity {

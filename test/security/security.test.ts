@@ -20,6 +20,9 @@ const config = (overrides: Partial<AppConfig> = {}): AppConfig => ({
     ipRateLimit: { limit: 100, windowMs: 60_000 },
     callbackRateLimit: { limit: 20, windowMs: 60_000 },
     sessionRateLimit: { limit: 60, windowMs: 60_000 },
+    kdfGlobalConcurrency: 1,
+    kdfJobTimeoutMs: 30_000,
+    kdfAllowInsecureLocalhost: false,
     ...overrides,
 });
 
@@ -217,5 +220,165 @@ describe('sanitized errors', () => {
         expect(response.status).toBe(500);
         expect(await response.json()).toEqual({ error: 'Internal Server Error' });
         expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    });
+
+    test('uses the frozen KDF error for uncaught pre-handler failures only on exact KDF paths', async () => {
+        const app = application();
+        app.get('/v2/kdf/failure', () => {
+            throw new Error('secret pre-handler detail');
+        });
+        app.get('/v2/kdf-lookalike/failure', () => {
+            throw new Error('legacy detail');
+        });
+
+        const kdf = await app.fetch(
+            new Request('https://service.test/v2/kdf/failure'),
+            { directPeerAddress: '198.51.100.10' },
+        );
+        expect(kdf.status).toBe(500);
+        expect(await kdf.json()).toEqual({ version: 1, error: { code: 'KDF_FAILED' } });
+
+        const legacy = await app.fetch(...request('/v2/kdf-lookalike/failure'));
+        expect(await legacy.json()).toEqual({ error: 'Internal Server Error' });
+    });
+});
+
+describe('remote KDF admission controls', () => {
+    test('enforces KDF HTTPS under both global modes and preserves legacy HTTPS bodies', async () => {
+        for (const enforceHttps of [false, true]) {
+            const security = createSecurity(config({ enforceHttps }));
+            const app = application(security);
+            app.get('/v2/kdf/revision', (context) => context.text('unreachable'));
+            app.get('/v1/ping', (context) => context.text('Pong!'));
+
+            const kdf = await app.fetch(...request('/v2/kdf/revision', {}, '198.51.100.10'));
+            expect(kdf.status).toBe(400);
+            expect(await kdf.json()).toEqual({ version: 1, error: { code: 'INVALID_REQUEST' } });
+
+            const v1 = await app.fetch(...request('/v1/ping', {}, '198.51.100.10'));
+            expect(v1.status).toBe(enforceHttps ? 400 : 200);
+            if (enforceHttps) expect(await v1.json()).toEqual({ error: 'HTTPS Required' });
+        }
+    });
+
+    test('allows insecure KDF only for direct loopback with the explicit flag', async () => {
+        const security = createSecurity(config({ kdfAllowInsecureLocalhost: true }));
+        const app = application(security);
+        app.get('/v2/kdf/revision', (context) => context.text('ok'));
+
+        expect((await app.fetch(...request('/v2/kdf/revision', {}, '127.0.0.1'))).status).toBe(200);
+        const external = await app.fetch(...request('/v2/kdf/revision', {}, '198.51.100.10'));
+        expect(external.status).toBe(400);
+    });
+
+    test('enforces the exact 4096-byte content-length and streamed body bound', async () => {
+        const security = createSecurity(config());
+        const app = application(security);
+        app.post('/v2/kdf/body', security.routes.kdfBodyLimit, async (context) => {
+            return context.text(String((await context.req.arrayBuffer()).byteLength));
+        });
+
+        const exact = await app.fetch(new Request('https://service.test/v2/kdf/body', {
+            method: 'POST',
+            body: 'x'.repeat(4096),
+        }), { directPeerAddress: '198.51.100.10' });
+        expect(exact.status).toBe(200);
+        expect(await exact.text()).toBe('4096');
+
+        for (const body of [
+            'x'.repeat(4097),
+            new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(new Uint8Array(4096));
+                    controller.enqueue(new Uint8Array(1));
+                    controller.close();
+                },
+            }),
+        ]) {
+            const response = await app.fetch(new Request('https://service.test/v2/kdf/body', {
+                method: 'POST',
+                body,
+            }), { directPeerAddress: '198.51.100.10' });
+            expect(response.status).toBe(400);
+            expect(await response.json()).toEqual({ version: 1, error: { code: 'INVALID_REQUEST' } });
+        }
+    });
+
+    test('uses fixed shared-IP and separate token-hash thresholds', async () => {
+        let now = 1_000_000;
+        const ipSecurity = createSecurity(config(), { now: () => now });
+        const ipApp = application(ipSecurity);
+        ipApp.get('/v2/kdf/ip', ipSecurity.routes.kdfIpRateLimit, (context) => context.text('ok'));
+        for (let count = 1; count <= 13; count += 1) {
+            const response = await ipApp.fetch(
+                new Request('https://service.test/v2/kdf/ip'),
+                { directPeerAddress: '198.51.100.20' },
+            );
+            expect(response.status).toBe(count <= 12 ? 200 : 429);
+            if (count === 13) {
+                expect(await response.json()).toEqual({ version: 1, error: { code: 'KDF_BUSY' } });
+            }
+        }
+        now += 60_001;
+        expect((await ipApp.fetch(
+            new Request('https://service.test/v2/kdf/ip'),
+            { directPeerAddress: '198.51.100.20' },
+        )).status).toBe(200);
+
+        const tokenSecurity = createSecurity(config(), { now: () => now });
+        const tokenApp = application(tokenSecurity);
+        const setSession = async (context: Parameters<typeof tokenSecurity.routes.kdfDeriveSessionRateLimit>[0], next: () => Promise<void>) => {
+            context.set('authenticatedSession', { userId: 'user', tokenHash: 'a'.repeat(64) });
+            await next();
+        };
+        tokenApp.get('/v2/kdf/derive-rate', setSession, tokenSecurity.routes.kdfDeriveSessionRateLimit,
+            (context) => context.text('ok'));
+        tokenApp.get('/v2/kdf/revision-rate', setSession, tokenSecurity.routes.kdfRevisionSessionRateLimit,
+            (context) => context.text('ok'));
+
+        for (let count = 1; count <= 5; count += 1) {
+            const response = await tokenApp.request('https://service.test/v2/kdf/derive-rate');
+            expect(response.status).toBe(count <= 4 ? 200 : 429);
+        }
+        now += 60_001;
+        expect((await tokenApp.request('https://service.test/v2/kdf/derive-rate')).status).toBe(200);
+        for (let count = 1; count <= 13; count += 1) {
+            const response = await tokenApp.request('https://service.test/v2/kdf/revision-rate');
+            expect(response.status).toBe(count <= 12 ? 200 : 429);
+        }
+    });
+
+    test('does not enter body middleware before HTTPS or after IP exhaustion', async () => {
+        const security = createSecurity(config());
+        const app = application(security);
+        let bodyEntries = 0;
+        const countedBody: typeof security.routes.kdfBodyLimit = async (context, next) => {
+            bodyEntries += 1;
+            await security.routes.kdfBodyLimit(context, next);
+        };
+        app.post('/v2/kdf/order', security.routes.kdfIpRateLimit, countedBody, (context) => context.text('ok'));
+
+        const insecure = await app.fetch(
+            new Request('http://service.test/v2/kdf/order', { method: 'POST', body: 'secret' }),
+            { directPeerAddress: '198.51.100.30' },
+        );
+        expect(insecure.status).toBe(400);
+        expect(bodyEntries).toBe(0);
+
+        for (let count = 1; count <= 12; count += 1) {
+            const response = await app.fetch(
+                new Request('https://service.test/v2/kdf/order', { method: 'POST', body: 'x' }),
+                { directPeerAddress: '198.51.100.31' },
+            );
+            expect(response.status).toBe(200);
+        }
+        expect(bodyEntries).toBe(12);
+
+        const limited = await app.fetch(
+            new Request('https://service.test/v2/kdf/order', { method: 'POST', body: 'must-not-be-read' }),
+            { directPeerAddress: '198.51.100.31' },
+        );
+        expect(limited.status).toBe(429);
+        expect(bodyEntries).toBe(12);
     });
 });

@@ -5,6 +5,7 @@ import {
     KDF_ERROR_STATUS,
     MAX_CLOUD_KEY_UTF8_BYTES,
     MAX_DECOMPRESSED_SETTINGS_BYTES,
+    MAX_KDF_REQUEST_BODY_BYTES,
     MAX_PASSWORD_SLOTS,
     MAX_PASSWORD_UTF8_BYTES,
     MAX_STORED_BLOB_BYTES,
@@ -99,5 +100,6 @@ describe('remote KDF v1 contracts', () => {
         expect(MAX_PASSWORD_UTF8_BYTES).toBe(256);
         expect(MAX_STORED_BLOB_BYTES).toBe(1024 * 1024);
         expect(MAX_DECOMPRESSED_SETTINGS_BYTES).toBe(256 * 1024);
+        expect(MAX_KDF_REQUEST_BODY_BYTES).toBe(4096);
     });
 });

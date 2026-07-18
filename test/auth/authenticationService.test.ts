@@ -221,4 +221,30 @@ describe('createAuthenticationService', () => {
         await auth.revokeAllSessions('discord-user');
         expect(users.users.has('discord-user')).toBe(false);
     });
+
+    test('authenticates the KDF path read-only without touching session activity', async () => {
+        const users = new InMemoryUsers();
+        const rawToken = token('e');
+        const lastUsedAt = new Date('2026-02-01T00:00:00.000Z');
+        users.users.set('discord-user', {
+            userId: 'discord-user',
+            sessions: [{
+                tokenHash: hashToken(rawToken),
+                createdAt: lastUsedAt,
+                lastUsedAt,
+            }],
+        });
+        const auth = createAuthenticationService({
+            userModel: users.model(),
+            now: () => new Date('2026-02-01T01:00:00.000Z'),
+        });
+
+        await expect(auth.authenticateReadOnly(rawToken)).resolves.toEqual({
+            userId: 'discord-user',
+            tokenHash: hashToken(rawToken),
+        });
+        await expect(auth.authenticateReadOnly(token('f'))).resolves.toBeNull();
+        expect(users.updateCalls).toHaveLength(0);
+        expect(users.users.get('discord-user')!.sessions[0].lastUsedAt).toEqual(lastUsedAt);
+    });
 });
