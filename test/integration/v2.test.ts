@@ -174,7 +174,7 @@ describe('authenticated remote KDF v2 routes', () => {
 
         const forbiddenBody = await fetch(current.app, deriveRequest({
             version: 1,
-            channelId: '1',
+            channelId: '12345678',
             cloudEncryptionKey: 'cloud-a',
             userId: 'account-b',
         }));
@@ -199,13 +199,13 @@ describe('authenticated remote KDF v2 routes', () => {
             settings?: Record<string, string>;
         }> = [
             { name: 'invalid json', request: deriveRequest('{'), status: 400, code: 'INVALID_REQUEST' },
-            { name: 'token only', request: deriveRequest({ version: 1, channelId: '1' }), status: 400, code: 'INVALID_REQUEST' },
-            { name: 'unauthorized', request: deriveRequest({ version: 1, channelId: '1', cloudEncryptionKey: 'x' }, 'bad'), status: 401, code: 'UNAUTHORIZED' },
-            { name: 'missing settings', request: deriveRequest({ version: 1, channelId: '1', cloudEncryptionKey: 'x' }), status: 404, code: 'CLOUD_SETTINGS_MISSING', settings: {} },
-            { name: 'passwordless', request: deriveRequest({ version: 1, channelId: '1', cloudEncryptionKey: 'x' }), status: 409, code: 'PASSWORDS_NOT_SYNCED', prepare: (current) => { current.kdf.failure = new KdfError('PASSWORDS_NOT_SYNCED'); } },
-            { name: 'wrong key', request: deriveRequest({ version: 1, channelId: '1', cloudEncryptionKey: 'x' }), status: 422, code: 'CLOUD_DECRYPT_FAILED', prepare: (current) => { current.kdf.failure = new KdfError('CLOUD_DECRYPT_FAILED'); } },
-            { name: 'busy', request: deriveRequest({ version: 1, channelId: '1', cloudEncryptionKey: 'x' }), status: 429, code: 'KDF_BUSY', prepare: (current) => { current.kdf.failure = new KdfError('KDF_BUSY'); } },
-            { name: 'failed', request: deriveRequest({ version: 1, channelId: '1', cloudEncryptionKey: 'x' }), status: 500, code: 'KDF_FAILED', prepare: (current) => { current.kdf.failure = new KdfError('KDF_FAILED'); } },
+            { name: 'token only', request: deriveRequest({ version: 1, channelId: '12345678' }), status: 400, code: 'INVALID_REQUEST' },
+            { name: 'unauthorized', request: deriveRequest({ version: 1, channelId: '12345678', cloudEncryptionKey: 'x' }, 'bad'), status: 401, code: 'UNAUTHORIZED' },
+            { name: 'missing settings', request: deriveRequest({ version: 1, channelId: '12345678', cloudEncryptionKey: 'x' }), status: 404, code: 'CLOUD_SETTINGS_MISSING', settings: {} },
+            { name: 'passwordless', request: deriveRequest({ version: 1, channelId: '12345678', cloudEncryptionKey: 'x' }), status: 409, code: 'PASSWORDS_NOT_SYNCED', prepare: (current) => { current.kdf.failure = new KdfError('PASSWORDS_NOT_SYNCED'); } },
+            { name: 'wrong key', request: deriveRequest({ version: 1, channelId: '12345678', cloudEncryptionKey: 'x' }), status: 422, code: 'CLOUD_DECRYPT_FAILED', prepare: (current) => { current.kdf.failure = new KdfError('CLOUD_DECRYPT_FAILED'); } },
+            { name: 'busy', request: deriveRequest({ version: 1, channelId: '12345678', cloudEncryptionKey: 'x' }), status: 429, code: 'KDF_BUSY', prepare: (current) => { current.kdf.failure = new KdfError('KDF_BUSY'); } },
+            { name: 'failed', request: deriveRequest({ version: 1, channelId: '12345678', cloudEncryptionKey: 'x' }), status: 500, code: 'KDF_FAILED', prepare: (current) => { current.kdf.failure = new KdfError('KDF_FAILED'); } },
         ];
 
         for (const item of cases) {
@@ -214,6 +214,21 @@ describe('authenticated remote KDF v2 routes', () => {
             const response = await fetch(current.app, item.request);
             expect(response.status, item.name).toBe(item.status);
             expect(await response.json(), item.name).toEqual({ version: 1, error: { code: item.code } });
+        }
+    });
+
+    test('rejects short Argon salts without loading settings or dispatching a worker job', async () => {
+        for (let length = 1; length < 8; length += 1) {
+            const current = harness();
+            const response = await fetch(current.app, deriveRequest({
+                version: 1,
+                channelId: '1'.repeat(length),
+                cloudEncryptionKey: 'x',
+            }));
+            expect(response.status).toBe(400);
+            expect(await response.json()).toEqual({ version: 1, error: { code: 'INVALID_REQUEST' } });
+            expect(current.loads).toHaveLength(0);
+            expect(current.kdf.derives).toHaveLength(0);
         }
     });
 
@@ -262,7 +277,7 @@ describe('authenticated remote KDF v2 routes', () => {
 
         const response = await fetch(current.app, deriveRequest({
             version: 1,
-            channelId: '1',
+            channelId: '12345678',
             cloudEncryptionKey: 'x',
         }));
         expect(response.status).toBe(200);
@@ -280,7 +295,7 @@ describe('authenticated remote KDF v2 routes', () => {
         const failed = harness({ security: throwingSecurity });
         const failure = await fetch(failed.app, deriveRequest({
             version: 1,
-            channelId: '1',
+            channelId: '12345678',
             cloudEncryptionKey: 'x',
         }));
         expect(failure.status).toBe(500);

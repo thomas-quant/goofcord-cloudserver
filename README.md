@@ -19,7 +19,7 @@ The service deliberately does not listen if its initial MongoDB connection, inde
 
 ### Remote KDF resource policy
 
-The authenticated `/v2/kdf/derive` boundary decrypts the caller's existing GoofCord cloud blob only in memory and returns ordered channel keys. It never accepts a client account ID, writes settings/session activity, caches passwords or keys, or logs request/response secrets. Startup self-tests every worker against the committed exact Argon2 vector before the server listens or reports ready.
+The authenticated `/v2/kdf/derive` boundary decrypts the caller's existing GoofCord cloud blob only in memory and returns ordered channel keys. Channel IDs must contain 8-20 ASCII digits; shorter values are rejected before worker admission because Argon2 requires a salt of at least eight bytes. It never accepts a client account ID, writes settings/session activity, caches passwords or keys, or logs request/response secrets. Startup self-tests every worker against the committed exact Argon2 vector before the server listens or reports ready.
 
 | Control | Fixed/default value |
 |---|---|
@@ -50,6 +50,8 @@ The optional `dev-mongo` profile starts `mongo:8.0.15` and publishes its unauthe
 No helper stops or removes a pre-existing generic MongoDB container. To remove this project's development data explicitly, use `docker compose --profile dev-mongo down -v` only when that deletion is intended.
 
 ## Production TLS, proxies, and MongoDB
+
+Run a single application process per database. Account saves and deletions are serialized in that process, with session authorization checked again after acquiring the account guard. This prevents an in-flight or queued save from restoring settings after a successful deletion. The guard, rate limits, and KDF admission controls are not shared across replicas; multi-process deployments need distributed coordination before they are supported.
 
 For deployed mode, terminate TLS at a reverse proxy and set `ENFORCE_HTTPS=true`. Set `TRUSTED_PROXY_CIDRS` to only the proxy addresses or networks, and ensure the Bun service is reachable solely from that proxy or a private container network. The server only honors `X-Forwarded-For` and `X-Forwarded-Proto` when the direct Bun peer is trusted. Its trusted-proxy policy accepts exactly one forwarded client address and one forwarded protocol value; comma-separated forwarding chains are ignored. Trusting forwarded headers while allowing direct public access permits clients to spoof them.
 

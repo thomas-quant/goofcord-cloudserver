@@ -26,7 +26,7 @@ const SELF_TEST_KEY = new Uint8Array([
     233, 183, 232, 77, 56, 210, 16, 176, 20, 165, 100, 68, 226, 205, 232, 4,
 ]);
 
-const CHANNEL_ID = /^[0-9]{1,20}$/;
+const CHANNEL_ID = /^[0-9]{8,20}$/;
 const REQUEST_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_PASSWORD_UTF8_BYTES = 256;
 

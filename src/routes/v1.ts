@@ -21,13 +21,38 @@ export function createV1Router(dependencies: V1Dependencies): Hono<AppEnv> {
 
     const session = (context: { get: (key: 'authenticatedSession') => AuthenticatedSession }) =>
         context.get('authenticatedSession');
+    const accountWrites = new Map<string, Promise<void>>();
+
+    const serializeAccountWrite: MiddlewareHandler<AppEnv> = async (context, next) => {
+        const { userId, tokenHash } = session(context);
+        const previous = accountWrites.get(userId) ?? Promise.resolve();
+        let release!: () => void;
+        const current = new Promise<void>((resolve) => { release = resolve; });
+        accountWrites.set(userId, current);
+        await previous;
+
+        try {
+            const authorization = context.req.header('authorization');
+            const activeSession = authorization
+                ? await dependencies.auth.authenticateReadOnly(authorization)
+                : null;
+            if (activeSession?.userId !== userId || activeSession.tokenHash !== tokenHash) {
+                return context.json({ error: UNAUTHORIZED_ERROR }, 401);
+            }
+            await next();
+        } finally {
+            release();
+            if (accountWrites.get(userId) === current) accountWrites.delete(userId);
+        }
+    };
 
     app.post(
         '/save',
-        dependencies.security.saveBodyLimit,
         dependencies.security.protectedIpRateLimit,
+        dependencies.security.saveBodyLimit,
         authenticate,
         dependencies.security.sessionRateLimit,
+        serializeAccountWrite,
         async (context) => {
             let json: { settings?: unknown };
             try {
@@ -36,7 +61,7 @@ export function createV1Router(dependencies: V1Dependencies): Hono<AppEnv> {
                 return context.json({ error: 'Bad Request' }, 400);
             }
 
-            if (typeof json.settings !== 'string') return context.json({ error: 'Bad Request' }, 400);
+            if (!json || typeof json.settings !== 'string') return context.json({ error: 'Bad Request' }, 400);
 
             try {
                 await dependencies.settings.save(session(context).userId, json.settings);
@@ -67,6 +92,7 @@ export function createV1Router(dependencies: V1Dependencies): Hono<AppEnv> {
         dependencies.security.protectedIpRateLimit,
         authenticate,
         dependencies.security.sessionRateLimit,
+        serializeAccountWrite,
         async (context) => {
             try {
                 const userId = session(context).userId;

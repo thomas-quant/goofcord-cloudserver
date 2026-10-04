@@ -75,6 +75,28 @@ describe('hardened application composition', () => {
         expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     });
 
+    test('rejects an exhausted save IP without consuming its body', async () => {
+        const app = createSecureApplication();
+        const bindings = { directPeerAddress: '198.51.100.20' };
+        for (let count = 0; count < 10; count += 1) {
+            await app.fetch(new Request('http://service.test/v1/load'), bindings);
+        }
+
+        let bodyReads = 0;
+        const body = new ReadableStream<Uint8Array>({
+            pull(controller) {
+                bodyReads += 1;
+                controller.enqueue(new TextEncoder().encode('{"settings":"payload"}'));
+                controller.close();
+            },
+        }, { highWaterMark: 0 });
+        const response = await app.fetch(new Request('http://service.test/v1/save', {
+            method: 'POST', body,
+        }), bindings);
+        expect(response.status).toBe(429);
+        expect(bodyReads).toBe(0);
+    });
+
     test('routes malformed settings JSON through the body boundary before persistence', async () => {
         const app = createSecureApplication();
         const response = await app.fetch(

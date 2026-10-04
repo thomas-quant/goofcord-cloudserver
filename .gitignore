@@ -1,3 +1,5 @@
+ci-artifacts/
+
 # Logs
 logs
 *.log

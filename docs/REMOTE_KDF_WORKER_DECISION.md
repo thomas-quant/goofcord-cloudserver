@@ -10,7 +10,7 @@ Argon2id v19, 65,536 KiB memory, three passes, parallelism one, and 32 output
 bytes. Passwords and Discord channel IDs enter as their exact UTF-8 bytes.
 
 This engine was selected because the committed vector proves byte equality with
-the GoofCrypt/stegcloak-rs path, it accepts the channel ID's arbitrary-length
+the GoofCrypt/stegcloak-rs path, it accepts the channel ID's 8-20-byte UTF-8
 salt unchanged, it returns raw key bytes, it adds no native build toolchain, and
 the blocking 64 MiB operation runs outside the primary HTTP event loop.
 

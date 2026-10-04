@@ -23,24 +23,24 @@ const KEY_2 = `${'A'.repeat(43)}=`;
 
 describe('remote KDF v1 contracts', () => {
     test('accepts only the exact bounded derive request shape', () => {
-        expect(createDeriveRequest('1', 'x')).toEqual({
+        expect(createDeriveRequest('12345678', 'x')).toEqual({
             ok: true,
-            value: { version: 1, channelId: '1', cloudEncryptionKey: 'x' },
+            value: { version: 1, channelId: '12345678', cloudEncryptionKey: 'x' },
         });
         expect(createDeriveRequest('9'.repeat(20), 'é'.repeat(MAX_CLOUD_KEY_UTF8_BYTES / 2)).ok).toBe(true);
 
-        for (const channelId of ['', '1'.repeat(21), '-1', '1.0', '１２３', '1e3']) {
+        for (const channelId of ['', '1234567', '1'.repeat(21), '-1', '1.0', '１２３', '1e3']) {
             expect(createDeriveRequest(channelId, 'x').ok).toBe(false);
         }
-        expect(createDeriveRequest('1', '').ok).toBe(false);
-        expect(createDeriveRequest('1', 'é'.repeat((MAX_CLOUD_KEY_UTF8_BYTES / 2) + 1)).ok).toBe(false);
+        expect(createDeriveRequest('12345678', '').ok).toBe(false);
+        expect(createDeriveRequest('12345678', 'é'.repeat((MAX_CLOUD_KEY_UTF8_BYTES / 2) + 1)).ok).toBe(false);
 
-        expect(parseDeriveRequest({ version: 1, channelId: '123', cloudEncryptionKey: 'key' }).ok).toBe(true);
-        expect(parseDeriveRequest({ version: 1, channelId: '123', cloudEncryptionKey: 'key', userId: 'victim' }).ok)
+        expect(parseDeriveRequest({ version: 1, channelId: '12345678', cloudEncryptionKey: 'key' }).ok).toBe(true);
+        expect(parseDeriveRequest({ version: 1, channelId: '12345678', cloudEncryptionKey: 'key', userId: 'victim' }).ok)
             .toBe(false);
-        expect(parseDeriveRequest({ version: 1, channelId: '123', cloudEncryptionKey: 'key', m: 8 }).ok)
+        expect(parseDeriveRequest({ version: 1, channelId: '12345678', cloudEncryptionKey: 'key', m: 8 }).ok)
             .toBe(false);
-        expect(parseDeriveRequest({ version: 2, channelId: '123', cloudEncryptionKey: 'key' }).ok).toBe(false);
+        expect(parseDeriveRequest({ version: 2, channelId: '12345678', cloudEncryptionKey: 'key' }).ok).toBe(false);
     });
 
     test('accepts only canonical 32-byte keys in stable contiguous slot order', () => {

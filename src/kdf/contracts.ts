@@ -77,7 +77,7 @@ export type KdfContractResult<T> =
     | { ok: true; value: T }
     | { ok: false; error: 'INVALID_REMOTE_KDF_CONTRACT' };
 
-const CHANNEL_ID = /^[0-9]{1,20}$/;
+const CHANNEL_ID = /^[0-9]{8,20}$/;
 const REVISION = /^[A-Za-z0-9_-]{43}$/;
 const KEY_BASE64 = /^[A-Za-z0-9+/]{43}=$/;
 
